@@ -32,11 +32,15 @@ CREATE TABLE IF NOT EXISTS members (
   merged_at     DATETIME     NULL COMMENT '合并封存时间',
   merge_reason  VARCHAR(500) NULL COMMENT '合并原因（值班经理填写）',
   merged_by     VARCHAR(32)  NULL COMMENT '执行合并的值班经理',
+  rent_suspended   TINYINT(1) NOT NULL DEFAULT 0 COMMENT '存在未缴清的损伤待缴费用：1 暂停租借器材，0 正常',
+  rent_suspended_at DATETIME NULL COMMENT '暂停租借时间',
+  rent_suspend_reason VARCHAR(200) NULL COMMENT '暂停原因（关联的损伤待缴费用）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_card_no (card_no),
   UNIQUE KEY uk_phone (phone),
   KEY idx_members_status (status),
-  KEY idx_members_merged_into (merged_into_id)
+  KEY idx_members_merged_into (merged_into_id),
+  KEY idx_members_rent_suspended (rent_suspended)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ================= 模块九：重复会员档案合并 =================
@@ -187,7 +191,7 @@ CREATE TABLE IF NOT EXISTS equipment (
   type        VARCHAR(16)  NOT NULL COMMENT 'RECURVE 反曲弓 / COMPOUND 复合弓 / TRADITIONAL 传统弓 / GEAR 护具 / ARROW 箭支',
   brand       VARCHAR(32)  NOT NULL COMMENT '品牌',
   rent_price  DECIMAL(10,2) NOT NULL COMMENT '租金（元/小时）',
-  status      VARCHAR(16)  NOT NULL COMMENT 'INSTOCK 在库 / RENTED 租出 / REPAIR 维修 / LOCKED 安全锁定',
+  status      VARCHAR(16)  NOT NULL COMMENT 'INSTOCK 在库 / RENTED 租出 / SETTLING 归还处理中（损伤清算） / REPAIR 维修 / SCRAPPED 报废封存 / LOCKED 安全锁定',
   renter_id   BIGINT       NULL,
   renter_name VARCHAR(32)  NULL,
   rented_at   DATETIME     NULL COMMENT '租出时间',
@@ -864,3 +868,181 @@ INSERT INTO cert_log (`id`, `application_id`, `action`, `operator`, `role`, `det
 INSERT INTO cert_log (`id`, `application_id`, `action`, `operator`, `role`, `detail`, `created_at`) VALUES (8, 3, 'EVAL', '认证系统', 'SYSTEM', '系统预评达标：1 回合 12 支箭平均 9.33 环（标准 ≥8.00），提交复核', '2026-09-17 09:00:00');
 INSERT INTO cert_log (`id`, `application_id`, `action`, `operator`, `role`, `detail`, `created_at`) VALUES (9, 3, 'APPROVE', '王铮', 'COACH', '复核通过：认证 2026-09-17 生效，有效期至 2027-09-17；适用范围：复合弓 30 米及以内射距', '2026-09-17 09:30:00');
 INSERT INTO cert_log (`id`, `application_id`, `action`, `operator`, `role`, `detail`, `created_at`) VALUES (10, 3, 'WITHDRAW', '王铮', 'COACH', '撤回认证：抽查发现证据窗口与实际训练记录不符，撤回并要求重新评定', '2026-09-25 15:00:00');
+
+-- ================= 模块十：器材损伤清算 =================
+-- 损伤计价规则：按 器材类型 × 严重程度 维护，带生效日期。
+-- 同一（类型，严重程度）在同一天只能有一条规则；规则调整 = 用新生效日期发布一条新规则，
+-- 旧规则保留在库中作为清算单的规则快照依据，后续调价绝不改写历史清算金额。
+CREATE TABLE IF NOT EXISTS damage_rule (
+  id           BIGINT       NOT NULL AUTO_INCREMENT,
+  equip_type   VARCHAR(16)  NOT NULL COMMENT 'RECURVE 反曲弓 / COMPOUND 复合弓 / TRADITIONAL 传统弓 / GEAR 护具 / ARROW 箭支',
+  severity     VARCHAR(16)  NOT NULL COMMENT 'LIGHT 轻微 / MEDIUM 较重 / SEVERE 严重报废',
+  effective_from DATE       NOT NULL COMMENT '生效日期（按检查开始日取生效中的规则）',
+  fee          DECIMAL(10,2) NOT NULL COMMENT '损伤费用（元）',
+  send_repair  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否送修',
+  scrap        TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否报废封存',
+  status       VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE 现行 / RETIRED 已停用',
+  note         VARCHAR(200) NULL COMMENT '规则说明',
+  created_by   VARCHAR(32)  NOT NULL COMMENT '维护人（值班经理）',
+  created_at   DATETIME     NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_damage_rule (equip_type, severity, effective_from),
+  KEY idx_damage_rule_scope (equip_type, severity, status, effective_from)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 清算单：器材管理员从「正在租借」的器材发起检查即建立。
+-- 检查开始后器材进入 SETTLING（归还处理中），清算结束前不能再次租借、切换维修状态或清除原租借人。
+-- 状态机：CHECKING 检查中 → READY 待结清 → RECHECK 待重新核对（基线变化）→ SETTLED 已结清；
+-- 取消的单子落 CANCELLED（器材恢复租出，不残留处理中状态）。
+CREATE TABLE IF NOT EXISTS damage_settlement (
+  id              BIGINT       NOT NULL AUTO_INCREMENT,
+  settle_no       VARCHAR(24)  NOT NULL COMMENT '清算单号',
+  equipment_id    BIGINT       NOT NULL,
+  equip_code      VARCHAR(24)  NOT NULL COMMENT '器材编号快照',
+  equip_type      VARCHAR(16)  NOT NULL,
+  renter_id       BIGINT       NOT NULL COMMENT '检查开始时的租借人（清算费用承担人，结算前变化即基线漂移）',
+  renter_name     VARCHAR(32)  NOT NULL,
+  status          VARCHAR(16)  NOT NULL COMMENT 'CHECKING / READY / RECHECK / SETTLED / CANCELLED',
+  -- 检查开始时固化的基线：器材状态、会员余额、适用计价规则指纹
+  baseline_date          DATE        NOT NULL COMMENT '基线日期：计价规则取该日期当天已生效的现行版本；重新核对后刷新为当天',
+  baseline_equip_status  VARCHAR(16) NOT NULL COMMENT '基线器材状态：RENTED（安全锁定中不能发起）',
+  baseline_balance       DECIMAL(10,2) NOT NULL COMMENT '基线会员余额',
+  baseline_rule_digest   VARCHAR(64) NOT NULL COMMENT '基线计价规则指纹（全部类型×严重程度的现行规则）',
+  baseline_snapshot_json TEXT        NOT NULL COMMENT '基线明细快照（器材 / 租借人 / 余额 / 规则列表）',
+  total_fee       DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '应收合计（各项减免后金额之和，结清时冻结）',
+  balance_deducted DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '结清时从余额扣减金额',
+  debt_amount     DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '结清时形成的待缴费用（余额不足部分）',
+  final_equip_status VARCHAR(16) NULL COMMENT '结清后器材最终状态：INSTOCK 在库 / REPAIR 维修 / SCRAPPED 报废封存',
+  recheck_reason  VARCHAR(500) NULL COMMENT '最近一次转待重新核对的原因',
+  created_by      VARCHAR(32)  NOT NULL COMMENT '发起检查的器材管理员',
+  created_at      DATETIME     NOT NULL,
+  settled_at      DATETIME     NULL,
+  settled_by      VARCHAR(32)  NULL COMMENT '结清执行人',
+  cancelled_at    DATETIME     NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_settle_no (settle_no),
+  KEY idx_settle_equipment (equipment_id, status),
+  KEY idx_settle_renter (renter_id, status),
+  KEY idx_settle_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 损伤明细：器材管理员逐项登记部位、严重程度、现场说明、责任会员，并固化采用的计价规则快照。
+-- 管理员的原检查结果（部位/严重程度/说明/责任会员/原始费用与规则快照）一旦提交即不可改写；
+-- 值班经理只能减免金额：减免前后金额、理由、操作人另列字段保存。
+CREATE TABLE IF NOT EXISTS damage_item (
+  id               BIGINT       NOT NULL AUTO_INCREMENT,
+  settlement_id    BIGINT       NOT NULL,
+  item_no          INT          NOT NULL COMMENT '项次，从 1 连续',
+  part             VARCHAR(32)  NOT NULL COMMENT '损伤部位：弓片 / 弓弦 / 箭杆 / 护具 / 瞄准器 等',
+  severity         VARCHAR(16)  NOT NULL COMMENT 'LIGHT 轻微 / MEDIUM 较重 / SEVERE 严重报废',
+  description      VARCHAR(500) NOT NULL COMMENT '现场说明',
+  responsible_id   BIGINT       NOT NULL COMMENT '责任会员 id',
+  responsible_name VARCHAR(32)  NOT NULL COMMENT '责任会员姓名',
+  rule_id          BIGINT       NULL COMMENT '采用的计价规则 id（可能被停用，仅做追溯）',
+  -- 规则快照：提交检查时固化，之后调价不影响本项历史金额
+  snap_equip_type  VARCHAR(16)  NOT NULL,
+  snap_severity    VARCHAR(16)  NOT NULL,
+  snap_effective_from DATE     NOT NULL,
+  snap_fee         DECIMAL(10,2) NOT NULL COMMENT '规则快照费用（减免前原金额）',
+  snap_send_repair TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '规则快照：是否送修',
+  snap_scrap       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '规则快照：是否报废封存',
+  final_fee        DECIMAL(10,2) NOT NULL COMMENT '当前应收（=减免后金额，未减免时等于 snap_fee）',
+  waived           TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '值班经理是否已减免本项',
+  waived_fee       DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '减免金额（snap_fee - final_fee）',
+  waive_reason     VARCHAR(500) NULL COMMENT '减免理由',
+  waived_by        VARCHAR(32)  NULL COMMENT '减免操作人（值班经理）',
+  waived_at        DATETIME     NULL,
+  created_at       DATETIME     NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_damage_item_no (settlement_id, item_no),
+  KEY idx_damage_item_responsible (responsible_id),
+  CONSTRAINT fk_damage_item_settlement FOREIGN KEY (settlement_id) REFERENCES damage_settlement (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 待缴费用：结清时余额扣到零后的剩余部分；会员补足后逐笔登记补款，还清自动解除租借限制。
+-- 异议处理期间状态 FROZEN：金额冻结，不能补款、不重复计提。
+CREATE TABLE IF NOT EXISTS damage_debt (
+  id             BIGINT       NOT NULL AUTO_INCREMENT,
+  debt_no        VARCHAR(24)  NOT NULL COMMENT '待缴单号',
+  settlement_id  BIGINT       NOT NULL,
+  member_id      BIGINT       NOT NULL COMMENT '欠费会员（清算单租借人）',
+  amount         DECIMAL(10,2) NOT NULL COMMENT '待缴金额（形成时的剩余费用）',
+  paid_amount    DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '已补款金额',
+  status         VARCHAR(16)  NOT NULL COMMENT 'UNPAID 待缴 / PARTIAL 部分缴纳 / FROZEN 异议冻结 / PAID 已缴清 / VOID 已撤销（异议成立）',
+  created_at     DATETIME     NOT NULL,
+  paid_at        DATETIME     NULL COMMENT '缴清时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_debt_no (debt_no),
+  UNIQUE KEY uk_debt_settlement (settlement_id),
+  KEY idx_debt_member (member_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 补款轨迹：会员补足待缴费用的每一笔都留痕；补款本身不改变已结清清算单的历史金额，
+-- 只核销待缴费用；最后一笔把待缴核销为已缴清时，自动恢复会员租借资格。
+CREATE TABLE IF NOT EXISTS damage_payment (
+  id            BIGINT       NOT NULL AUTO_INCREMENT,
+  debt_id       BIGINT       NOT NULL,
+  settlement_id BIGINT       NOT NULL,
+  member_id     BIGINT       NOT NULL,
+  amount        DECIMAL(10,2) NOT NULL COMMENT '本次补款金额',
+  balance_before DECIMAL(10,2) NOT NULL COMMENT '补款后扣减前余额',
+  balance_after  DECIMAL(10,2) NOT NULL COMMENT '扣减后余额',
+  debt_remaining DECIMAL(10,2) NOT NULL COMMENT '本次补款后剩余待缴',
+  lifted_rent_ban TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '本次是否触发欠款解限（恢复租借资格）',
+  operator      VARCHAR(32)  NOT NULL COMMENT '补款经手人',
+  created_at    DATETIME     NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_payment_debt (debt_id),
+  KEY idx_payment_member (member_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 异议：会员对「待缴费用」提出，提出即冻结金额；值班经理只能维持 / 减免 / 撤销本次费用，
+-- 不能改动管理员的原损伤检查（部位 / 严重程度 / 说明 / 责任会员 / 原始规则快照均不动）。
+CREATE TABLE IF NOT EXISTS damage_dispute (
+  id             BIGINT       NOT NULL AUTO_INCREMENT,
+  debt_id        BIGINT       NOT NULL,
+  settlement_id  BIGINT       NOT NULL,
+  member_id      BIGINT       NOT NULL,
+  reason         VARCHAR(500) NOT NULL COMMENT '会员异议理由',
+  status         VARCHAR(16)  NOT NULL COMMENT 'OPEN 处理中（金额冻结） / UPHOLD 维持 / REDUCE 减免 / VOID 撤销',
+  decision_note  VARCHAR(500) NULL COMMENT '值班经理处理意见',
+  reduce_amount  DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '减免处理时核减的待缴金额',
+  decided_by     VARCHAR(32)  NULL,
+  created_at     DATETIME     NOT NULL,
+  decided_at     DATETIME     NULL,
+  PRIMARY KEY (id),
+  KEY idx_dispute_debt (debt_id),
+  KEY idx_dispute_member (member_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 清算操作轨迹：发起检查 / 提交检查 / 减免 / 转待重新核对 / 重新核对 / 结清 /
+-- 取消 / 补款解限 / 异议提出与处理，全程留痕。
+CREATE TABLE IF NOT EXISTS damage_log (
+  id            BIGINT       NOT NULL AUTO_INCREMENT,
+  settlement_id BIGINT       NOT NULL,
+  debt_id       BIGINT       NULL,
+  action        VARCHAR(24)  NOT NULL COMMENT 'CREATE / SUBMIT / WAIVE / RECHECK_FLAG / RECONFIRM / SETTLE / CANCEL / PAY / DISPUTE / DISPUTE_DECIDE',
+  operator      VARCHAR(32)  NOT NULL,
+  role          VARCHAR(16)  NOT NULL COMMENT 'KEEPER 器材管理员 / MANAGER 值班经理 / MEMBER 会员 / SYSTEM 清算系统',
+  detail        VARCHAR(500) NULL,
+  created_at    DATETIME     NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_damage_log_settlement (settlement_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- damage_rule：5 类器材 × 3 档严重程度 = 15 条现行计价规则（生效日期 2026-09-01）
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (1, 'RECURVE', 'LIGHT', '2026-09-01', 80.00, 0, 0, 'ACTIVE', '反曲弓轻微损伤：弓弦磨损、弓片轻微划痕等，保养后可继续使用', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (2, 'RECURVE', 'MEDIUM', '2026-09-01', 320.00, 1, 0, 'ACTIVE', '反曲弓较重损伤：弓片暗裂、弓把松动等，必须送修检测', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (3, 'RECURVE', 'SEVERE', '2026-09-01', 1800.00, 0, 1, 'ACTIVE', '反曲弓严重损伤：弓片贯穿裂纹，直接报废封存', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (4, 'COMPOUND', 'LIGHT', '2026-09-01', 100.00, 0, 0, 'ACTIVE', '复合弓轻微损伤：弓弦起毛、瞄具松脱等', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (5, 'COMPOUND', 'MEDIUM', '2026-09-01', 480.00, 1, 0, 'ACTIVE', '复合弓较重损伤：轮组异响、偏心轮偏移，必须送修', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (6, 'COMPOUND', 'SEVERE', '2026-09-01', 2600.00, 0, 1, 'ACTIVE', '复合弓严重损伤：弓片断裂、轮组崩裂，报废封存', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (7, 'TRADITIONAL', 'LIGHT', '2026-09-01', 60.00, 0, 0, 'ACTIVE', '传统弓轻微损伤：弦料磨损、箭台轻微变形', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (8, 'TRADITIONAL', 'MEDIUM', '2026-09-01', 220.00, 1, 0, 'ACTIVE', '传统弓较重损伤：弓梢开裂，送修胶合校正', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (9, 'TRADITIONAL', 'SEVERE', '2026-09-01', 1200.00, 0, 1, 'ACTIVE', '传统弓严重损伤：弓把劈裂，无法修复，报废封存', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (10, 'GEAR', 'LIGHT', '2026-09-01', 30.00, 0, 0, 'ACTIVE', '护具轻微损伤：魔术贴松脱、护臂划痕', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (11, 'GEAR', 'MEDIUM', '2026-09-01', 90.00, 1, 0, 'ACTIVE', '护具较重损伤：护指皮层破裂、护具结构变形，送修或更换部件', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (12, 'GEAR', 'SEVERE', '2026-09-01', 260.00, 0, 1, 'ACTIVE', '护具严重破损：结构失效无法提供防护，报废封存', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (13, 'ARROW', 'LIGHT', '2026-09-01', 10.00, 0, 0, 'ACTIVE', '箭支轻微损伤：尾钉松脱、羽片轻微缺损，调校即可', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (14, 'ARROW', 'MEDIUM', '2026-09-01', 25.00, 1, 0, 'ACTIVE', '箭杆弯曲：送修校直检测后再上架', '值班经理', '2026-09-01 09:00:00');
+INSERT INTO damage_rule (`id`, `equip_type`, `severity`, `effective_from`, `fee`, `send_repair`, `scrap`, `status`, `note`, `created_by`, `created_at`) VALUES (15, 'ARROW', 'SEVERE', '2026-09-01', 60.00, 0, 1, 'ACTIVE', '箭杆断裂 / 箭头崩裂，报废封存', '值班经理', '2026-09-01 09:00:00');

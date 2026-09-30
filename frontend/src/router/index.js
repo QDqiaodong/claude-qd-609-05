@@ -11,7 +11,8 @@ export const navItems = [
   { key: 'safety', path: '/safety', icon: '🛑', label: '联锁', hint: '安全停射联锁台：停射事件 · 双人复核 · 复射放行', badge: 'safetyActive', unit: '起' },
   { key: 'cert', path: '/cert', icon: '🎖️', label: '认证', hint: '弓种能力认证：证据窗口 · 版本化规则 · 教练复核 · 有效期', badge: 'certPending', unit: '待复核' },
   { key: 'courses', path: '/courses', icon: '📚', label: '课程', hint: '卡片列表，满员禁用报名', badge: 'courseTotal', unit: '门' },
-  { key: 'equipment', path: '/equipment', icon: '🧰', label: '器材', hint: '表格 + 租借归还', badge: 'equipRented', unit: '租出' }
+  { key: 'equipment', path: '/equipment', icon: '🧰', label: '器材', hint: '表格 + 租借归还', badge: 'equipRented', unit: '租出' },
+  { key: 'damage', path: '/damage', icon: '🧾', label: '清算', hint: '器材损伤清算：检查登记 · 费用结清 · 补款解限 · 异议 · 历史', badge: 'equipSettling', unit: '处理中' }
 ]
 
 export const memberItem = { key: 'members', path: '/members', icon: '🪪', label: '会员', hint: '开卡 / 充值 / 等级', badge: 'memberTotal', unit: '人' }
@@ -25,6 +26,7 @@ const routes = [
   { path: '/cert', name: 'cert', component: () => import('../views/CertView.vue') },
   { path: '/courses', name: 'courses', component: () => import('../views/CourseView.vue') },
   { path: '/equipment', name: 'equipment', component: () => import('../views/EquipmentView.vue') },
+  { path: '/damage', name: 'damage', component: () => import('../views/DamageView.vue') },
   { path: '/members', name: 'members', component: () => import('../views/MemberView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/lanes' }
 ]

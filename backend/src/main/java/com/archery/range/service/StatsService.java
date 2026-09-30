@@ -76,6 +76,8 @@ public class StatsService {
         counters.put("courseTotal", courseRepository.count());
         counters.put("equipTotal", equipmentRepository.count());
         counters.put("equipRented", equipmentRepository.findByStatusOrderByEquipCodeAsc("RENTED").size());
+        counters.put("equipSettling", equipmentRepository.findByStatusOrderByEquipCodeAsc("SETTLING").size());
+        counters.put("equipScrapped", equipmentRepository.findByStatusOrderByEquipCodeAsc("SCRAPPED").size());
         counters.put("safetyActive", safetyEventRepository.countByStatusNot("RELEASED"));
         counters.put("certPending", certApplicationRepository.countByStatus("PENDING"));
         counters.put("tournamentTotal", tournamentRepository.count());

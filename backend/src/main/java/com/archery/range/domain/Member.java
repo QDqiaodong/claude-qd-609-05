@@ -69,6 +69,16 @@ public class Member {
     @Column(name = "merged_by", length = 32)
     private String mergedBy;
 
+    /** 存在未缴清的损伤待缴费用时暂停租借器材：结清 / 撤销 / 缴清后解除 */
+    @Column(name = "rent_suspended", nullable = false)
+    private Boolean rentSuspended = false;
+
+    @Column(name = "rent_suspended_at")
+    private LocalDateTime rentSuspendedAt;
+
+    @Column(name = "rent_suspend_reason", length = 200)
+    private String rentSuspendReason;
+
     public Long getId() {
         return id;
     }
@@ -171,5 +181,29 @@ public class Member {
 
     public void setMergedBy(String mergedBy) {
         this.mergedBy = mergedBy;
+    }
+
+    public Boolean getRentSuspended() {
+        return rentSuspended;
+    }
+
+    public void setRentSuspended(Boolean rentSuspended) {
+        this.rentSuspended = rentSuspended;
+    }
+
+    public LocalDateTime getRentSuspendedAt() {
+        return rentSuspendedAt;
+    }
+
+    public void setRentSuspendedAt(LocalDateTime rentSuspendedAt) {
+        this.rentSuspendedAt = rentSuspendedAt;
+    }
+
+    public String getRentSuspendReason() {
+        return rentSuspendReason;
+    }
+
+    public void setRentSuspendReason(String rentSuspendReason) {
+        this.rentSuspendReason = rentSuspendReason;
     }
 }

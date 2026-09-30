@@ -31,7 +31,12 @@
             <el-tag v-if="row.status === 'MERGED'" size="small" type="info" effect="plain">已封存</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="姓名" width="110" />
+        <el-table-column prop="name" label="姓名" width="150">
+          <template #default="{ row }">
+            {{ row.name }}
+            <el-tag v-if="row.rentSuspended" size="small" type="danger" effect="plain">租借暂停</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="phone" label="手机号" width="140" />
         <el-table-column label="等级" width="120">
           <template #default="{ row }">

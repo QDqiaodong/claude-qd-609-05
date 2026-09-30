@@ -110,6 +110,17 @@ public class MemberService {
         }
     }
 
+    /**
+     * 存在未缴清的损伤待缴费用（含异议冻结中）的会员不能再租借器材，
+     * 补款缴清、费用被异议撤销或全部减免后由清算流程解除。
+     */
+    public void rejectIfRentSuspended(Member member) {
+        if (member != null && Boolean.TRUE.equals(member.getRentSuspended())) {
+            throw new BizException("会员 [" + member.getName() + "] 存在未缴清的器材损伤待缴费用，"
+                    + "已暂停租借器材；请先到「损伤清算」补足费用或完成异议处理");
+        }
+    }
+
     private String mergedTargetCard(Long targetId) {
         return memberRepository.findById(targetId)
                 .map(m -> m.getCardNo() + "（" + m.getName() + "）")
@@ -178,11 +189,14 @@ public class MemberService {
                 bestGroups.size(),
                 validCertCount,
                 member.getStatus(),
-                merged ? "已合并封存" : "在用",
+                merged ? "已合并封存" : (Boolean.TRUE.equals(member.getRentSuspended()) ? "租借受限" : "在用"),
                 member.getMergedIntoId(),
                 mergedIntoCardNo,
                 member.getMergedAt(),
                 member.getMergeReason(),
-                member.getMergedBy());
+                member.getMergedBy(),
+                Boolean.TRUE.equals(member.getRentSuspended()),
+                member.getRentSuspendedAt(),
+                member.getRentSuspendReason());
     }
 }

@@ -150,3 +150,14 @@ body {
   border-color: #dde1e3;
   color: #9aa5aa;
 }
+
+/* 器材页内跳转清算台的链接 */
+.link {
+  color: var(--el-color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.link:hover {
+  text-decoration: underline;
+}

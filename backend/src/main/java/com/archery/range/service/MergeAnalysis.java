@@ -111,6 +111,7 @@ final class MergeAnalysis {
         List<MergeDtos.ConflictItem> conflicts = new ArrayList<>();
         conflicts.addAll(ongoingRoundConflicts(keep, source));
         conflicts.addAll(sharedEquipmentConflicts(keep, source));
+        conflicts.addAll(settlingEquipmentConflicts(keepMember, sourceMember));
         conflicts.addAll(validCertConflicts(keep, source));
         conflicts.addAll(sameTournamentConflicts(keep, source));
 
@@ -237,6 +238,28 @@ final class MergeAnalysis {
                                 + "请先归还其中一方再合并",
                         keepItem.equipmentId(), sourceItem.equipmentId(),
                         keepItem.equipCode(), sourceItem.equipCode()));
+            }
+        }
+        return list;
+    }
+
+    /** 任一侧有器材正在归还处理（损伤清算未结束）：必须先结清或取消清算，禁止合并改挂租借人 */
+    private List<MergeDtos.ConflictItem> settlingEquipmentConflicts(Member keepMember, Member sourceMember) {
+        List<MergeDtos.ConflictItem> list = new ArrayList<>();
+        for (Member member : List.of(keepMember, sourceMember)) {
+            long count = equipmentRepository.countByStatusAndRenterId("SETTLING", member.getId());
+            if (count > 0) {
+                list.add(new MergeDtos.ConflictItem("EQUIPMENT_SETTLING", "存在归还处理中的器材",
+                        "会员 " + member.getName() + " 有 " + count + " 件器材正在损伤清算（归还处理中），"
+                                + "清算结束前租借人不能改挂，请先完成结清或取消检查后再合并",
+                        member.getId(), null, member.getCardNo(), null));
+            }
+            // 租借受限（存在未缴清的损伤待缴费用）：债务关系必须先结清或随本人档案处理，不能并入保留卡
+            if (Boolean.TRUE.equals(member.getRentSuspended())) {
+                list.add(new MergeDtos.ConflictItem("MEMBER_DEBT_SUSPENDED", "会员存在未缴清的损伤待缴费用",
+                        "会员 " + member.getName() + " 因损伤待缴费用已被暂停租借，请先补足欠款（或完成异议处理）"
+                                + "恢复租借资格后再合并，避免待缴费用随档案合并错挂",
+                        member.getId(), null, member.getCardNo(), null));
             }
         }
         return list;

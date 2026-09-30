@@ -52,6 +52,10 @@ public final class MemberDtos {
             String mergedIntoCardNo,
             LocalDateTime mergedAt,
             String mergeReason,
-            String mergedBy) {
+            String mergedBy,
+            /** 存在未缴清的损伤待缴费用：暂停租借器材 */
+            Boolean rentSuspended,
+            LocalDateTime rentSuspendedAt,
+            String rentSuspendReason) {
     }
 }

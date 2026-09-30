@@ -142,8 +142,60 @@ public final class RangeDict {
     private static final Map<String, String> EQUIP_STATUS = Map.of(
             "INSTOCK", "在库",
             "RENTED", "租出",
+            "SETTLING", "归还处理中",
             "REPAIR", "维修",
+            "SCRAPPED", "报废封存",
             "LOCKED", "安全锁定");
+
+    // ---------------- 器材损伤清算 ----------------
+    /** 损伤严重程度：轻微 / 较重 / 严重报废 */
+    private static final Map<String, String> DAMAGE_SEVERITY = Map.of(
+            "LIGHT", "轻微",
+            "MEDIUM", "较重",
+            "SEVERE", "严重报废");
+
+    /** 清算单状态机 */
+    private static final Map<String, String> SETTLE_STATUS = Map.of(
+            "CHECKING", "检查中",
+            "READY", "待结清",
+            "RECHECK", "待重新核对",
+            "SETTLED", "已结清",
+            "CANCELLED", "已取消");
+
+    /** 待缴费用状态 */
+    private static final Map<String, String> DEBT_STATUS = Map.of(
+            "UNPAID", "待缴",
+            "PARTIAL", "部分缴纳",
+            "FROZEN", "异议冻结",
+            "PAID", "已缴清",
+            "VOID", "已撤销");
+
+    /** 异议处理结论 */
+    private static final Map<String, String> DISPUTE_STATUS = Map.of(
+            "OPEN", "处理中",
+            "UPHOLD", "维持",
+            "REDUCE", "减免",
+            "VOID", "撤销");
+
+    /** 损伤清算台角色 */
+    private static final Map<String, String> DAMAGE_ROLE = Map.of(
+            "KEEPER", "器材管理员",
+            "MANAGER", "值班经理",
+            "MEMBER", "会员",
+            "SYSTEM", "清算系统");
+
+    /** 清算操作轨迹动作 */
+    private static final Map<String, String> DAMAGE_ACTION = Map.ofEntries(
+            Map.entry("CREATE", "发起损伤检查"),
+            Map.entry("SUBMIT", "提交检查结果"),
+            Map.entry("WAIVE", "值班经理减免"),
+            Map.entry("RECHECK_FLAG", "基线变化转待重新核对"),
+            Map.entry("RECONFIRM", "重新核对"),
+            Map.entry("SETTLE", "结清清算单"),
+            Map.entry("CANCEL", "取消检查"),
+            Map.entry("PAY", "补款解限"),
+            Map.entry("DISPUTE", "提出异议"),
+            Map.entry("DISPUTE_DECIDE", "异议处理"));
 
     // ---------------- 回合状态 ----------------
     private static final Map<String, String> ROUND_STATUS = Map.of(
@@ -476,5 +528,35 @@ public final class RangeDict {
 
     public static String tournamentActionName(String action) {
         return action == null ? "" : TOURNAMENT_ACTION.getOrDefault(action, action);
+    }
+
+    // ---------------- 器材损伤清算取值 ----------------
+
+    public static boolean isValidDamageSeverity(String severity) {
+        return severity != null && DAMAGE_SEVERITY.containsKey(severity);
+    }
+
+    public static String damageSeverityName(String severity) {
+        return severity == null ? "" : DAMAGE_SEVERITY.getOrDefault(severity, severity);
+    }
+
+    public static String settleStatusName(String status) {
+        return status == null ? "" : SETTLE_STATUS.getOrDefault(status, status);
+    }
+
+    public static String debtStatusName(String status) {
+        return status == null ? "" : DEBT_STATUS.getOrDefault(status, status);
+    }
+
+    public static String disputeStatusName(String status) {
+        return status == null ? "" : DISPUTE_STATUS.getOrDefault(status, status);
+    }
+
+    public static String damageRoleName(String role) {
+        return role == null ? "" : DAMAGE_ROLE.getOrDefault(role, role);
+    }
+
+    public static String damageActionName(String action) {
+        return action == null ? "" : DAMAGE_ACTION.getOrDefault(action, action);
     }
 }

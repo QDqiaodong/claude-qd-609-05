@@ -14,9 +14,12 @@
     </div>
 
     <div class="rule-tip">
-      只有「在库」器材可租借，租借按 1 小时租金从会员余额扣；「租出」可归还；「维修」中的器材不能租借，修好后回到在库。
-      「安全锁定」由停射事件触发，锁定期间禁止租借、归还与切换维修状态，放行后恢复锁定前状态。
+      只有「在库」器材可租借，租借按 1 小时租金从会员余额扣；「租出」可直接归还，或由器材管理员到
+      <router-link to="/damage" class="link">损伤清算</router-link>发起检查（弓片裂纹 / 弓弦磨损 / 箭杆弯曲 / 护具破损）；
+      「归还处理中」清算结束前不能租借、报修或清除租借人；「维修」中的器材不能租借，修好后回到在库；「报废封存」永久不可用。
+      「安全锁定」由停射事件触发，锁定期间禁止租借、归还、检查与切换维修状态，放行后恢复锁定前状态。
       <b>租借反曲弓 / 复合弓 / 传统弓器材，会员必须持有该弓种的当前有效认证；护具与箭支不受限制。</b>
+      会员存在未缴清的损伤待缴费用时，租借入口会被暂停。
     </div>
 
     <div class="panel">
@@ -42,11 +45,16 @@
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :disabled="row.status !== 'INSTOCK'" @click="openRent(row)">租借</el-button>
             <el-button link type="success" :disabled="row.status !== 'RENTED'" @click="giveBack(row)">归还</el-button>
-            <el-button link type="warning" :disabled="row.status === 'RENTED' || row.status === 'LOCKED'" @click="repair(row)">
+            <el-button
+              v-if="row.status === 'RENTED'"
+              link type="warning"
+              @click="goDamage"
+            >损伤检查</el-button>
+            <el-button link type="warning" :disabled="row.status === 'RENTED' || row.status === 'LOCKED' || row.status === 'SETTLING' || row.status === 'SCRAPPED'" @click="repair(row)">
               {{ row.status === 'REPAIR' ? '修好' : '报修' }}
             </el-button>
           </template>
@@ -106,10 +114,16 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { certApi, equipApi, memberApi, money, shortTime } from '../api'
 
 const BOW_TYPES = ['RECURVE', 'COMPOUND', 'TRADITIONAL']
+const router = useRouter()
+
+function goDamage() {
+  router.push('/damage')
+}
 
 const list = ref([])
 const members = ref([])
@@ -144,6 +158,8 @@ const bowCertText = computed(() => {
 function statusType(status) {
   if (status === 'INSTOCK') return 'success'
   if (status === 'RENTED') return 'primary'
+  if (status === 'SETTLING') return 'warning'
+  if (status === 'SCRAPPED') return 'info'
   if (status === 'LOCKED') return 'danger'
   return 'info'
 }

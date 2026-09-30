@@ -36,16 +36,23 @@ public interface EquipmentRepository extends JpaRepository<Equipment, Long> {
     @Query("select e from Equipment e where e.id in :ids order by e.id")
     List<Equipment> findAllByIdForUpdate(@Param("ids") List<Long> ids);
 
-    /** 悲观写锁：合并迁移来源会员当前租借器材时锁定，与租借 / 归还 / 安全联锁互斥 */
+    /**
+     * 悲观写锁：合并迁移来源会员当前租借器材时锁定，与租借 / 归还 / 安全联锁互斥。
+     * 归还处理中（SETTLING）的器材绑定着未结束的损伤清算，不允许在合并中改挂租借人
+     * ——否则会破坏清算单的「租借人基线」；这类器材须先完成或取消清算。
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select e from Equipment e where e.status = 'RENTED' and e.renterId = :renterId order by e.id")
     List<Equipment> findRentedByRenterForUpdate(@Param("renterId") Long renterId);
 
-    /** 重复档案合并：来源会员当前租借器材改挂保留会员（租出时间原样保留） */
+    /** 重复档案合并：来源会员当前租借器材改挂保留会员（租出时间原样保留；不动清算中的器材） */
     @Modifying(flushAutomatically = true)
     @Query("update Equipment e set e.renterId = :keepId, e.renterName = :keepName"
             + " where e.status = 'RENTED' and e.renterId = :sourceId")
     int reassignRenter(@Param("sourceId") Long sourceId,
             @Param("keepId") Long keepId,
             @Param("keepName") String keepName);
+
+    /** 某会员名下处于归还处理中（损伤清算未结束）的器材数：合并互斥判定使用 */
+    long countByStatusAndRenterId(String status, Long renterId);
 }

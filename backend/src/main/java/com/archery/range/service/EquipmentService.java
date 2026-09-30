@@ -73,6 +73,8 @@ public class EquipmentService {
         Member member = memberService.require(req.memberId());
         // 已合并封存的来源档案不能再租借器材
         memberService.rejectIfMerged(member, "租借器材");
+        // 存在未缴清的损伤待缴费用：暂停租借，补足欠款或完成异议处理后恢复
+        memberService.rejectIfRentSuspended(member);
         // 租借弓类器材必须持有该弓种的当前有效认证（护具 / 箭支不限制）
         certService.requireBowCert(member, equipment.getType());
         memberService.charge(member, equipment.getRentPrice(), "租借 " + equipment.getEquipCode());
@@ -84,11 +86,18 @@ public class EquipmentService {
         return toView(equipmentRepository.save(equipment));
     }
 
-    /** 归还：只有租出的器材能还。安全锁定中禁止归还。 */
+    /** 归还：只有租出的器材能还。安全锁定中禁止归还；归还处理中必须走损伤清算流程。 */
     @Transactional
     public EquipmentDtos.EquipmentView giveBack(Long id) {
         Equipment equipment = requireForUpdate(id);
         rejectIfLocked(equipment, "归还");
+        if ("SETTLING".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode()
+                    + "] 正在归还处理（损伤清算未结束），不能直接归还，请在「损伤清算」中完成检查结清或取消检查");
+        }
+        if ("SCRAPPED".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode() + "] 已报废封存，不能归还");
+        }
         if (!"RENTED".equals(equipment.getStatus())) {
             throw new BizException("器材 [" + equipment.getEquipCode() + "] 未处于租出状态，无需归还");
         }
@@ -99,11 +108,18 @@ public class EquipmentService {
         return toView(equipmentRepository.save(equipment));
     }
 
-    /** 报修 / 修好：在库 → 维修，维修 → 在库。安全锁定中禁止切换维修状态。 */
+    /** 报修 / 修好：在库 → 维修，维修 → 在库。安全锁定 / 清算处理中禁止切换维修状态。 */
     @Transactional
     public EquipmentDtos.EquipmentView toggleRepair(Long id) {
         Equipment equipment = requireForUpdate(id);
         rejectIfLocked(equipment, "切换维修状态");
+        if ("SETTLING".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode()
+                    + "] 正在归还处理（损伤清算未结束），清算结束前不能切换维修状态");
+        }
+        if ("SCRAPPED".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode() + "] 已报废封存，不能再切换维修状态");
+        }
         if ("RENTED".equals(equipment.getStatus())) {
             throw new BizException("器材 [" + equipment.getEquipCode() + "] 租出中，请先归还再报修");
         }
