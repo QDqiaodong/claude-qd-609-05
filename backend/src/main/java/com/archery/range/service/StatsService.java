@@ -36,6 +36,8 @@ public class StatsService {
     private final SafetyEventRepository safetyEventRepository;
     private final TournamentRepository tournamentRepository;
     private final CertApplicationRepository certApplicationRepository;
+    private final com.archery.range.repository.DamageSettlementRepository damageSettlementRepository;
+    private final com.archery.range.repository.MemberDebtRepository memberDebtRepository;
     private final RoundService roundService;
 
     public StatsService(LaneRepository laneRepository,
@@ -47,6 +49,8 @@ public class StatsService {
             SafetyEventRepository safetyEventRepository,
             TournamentRepository tournamentRepository,
             CertApplicationRepository certApplicationRepository,
+            com.archery.range.repository.DamageSettlementRepository damageSettlementRepository,
+            com.archery.range.repository.MemberDebtRepository memberDebtRepository,
             RoundService roundService) {
         this.laneRepository = laneRepository;
         this.memberRepository = memberRepository;
@@ -57,6 +61,8 @@ public class StatsService {
         this.safetyEventRepository = safetyEventRepository;
         this.tournamentRepository = tournamentRepository;
         this.certApplicationRepository = certApplicationRepository;
+        this.damageSettlementRepository = damageSettlementRepository;
+        this.memberDebtRepository = memberDebtRepository;
         this.roundService = roundService;
     }
 
@@ -80,6 +86,8 @@ public class StatsService {
         counters.put("certPending", certApplicationRepository.countByStatus("PENDING"));
         counters.put("tournamentTotal", tournamentRepository.count());
         counters.put("tournamentOngoing", tournamentRepository.countByStatus("ONGOING"));
+        counters.put("damageSettling", damageSettlementRepository.findByStatusNotOrderByIdDesc("SETTLED").size());
+        counters.put("debtUnpaid", memberDebtRepository.countUnpaid());
 
         List<RoundDtos.RoundView> top = roundRepository.findByStatusOrderByStartTimeDesc("SUBMITTED").stream()
                 .sorted(Comparator.comparingInt((com.archery.range.domain.Round r) ->

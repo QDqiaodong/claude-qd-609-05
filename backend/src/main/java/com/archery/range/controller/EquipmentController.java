@@ -77,6 +77,8 @@ public class EquipmentController {
                 Map.of("code", "INSTOCK", "name", RangeDict.equipStatusName("INSTOCK")),
                 Map.of("code", "RENTED", "name", RangeDict.equipStatusName("RENTED")),
                 Map.of("code", "REPAIR", "name", RangeDict.equipStatusName("REPAIR")),
+                Map.of("code", "SETTLING", "name", RangeDict.equipStatusName("SETTLING")),
+                Map.of("code", "SCRAPPED", "name", RangeDict.equipStatusName("SCRAPPED")),
                 Map.of("code", "LOCKED", "name", RangeDict.equipStatusName("LOCKED"))));
         return ApiResponse.success(options);
     }

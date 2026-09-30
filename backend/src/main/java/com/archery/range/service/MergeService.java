@@ -57,6 +57,8 @@ public class MergeService {
     private final com.archery.range.repository.LaneRepository laneRepository;
     private final MergeRelationMigrator migrator;
     private final ObjectMapper objectMapper;
+    private final com.archery.range.repository.DamageSettlementRepository damageSettlementRepository;
+    private final com.archery.range.repository.MemberDebtRepository memberDebtRepository;
 
     private final MergeAnalysis analysis;
 
@@ -68,6 +70,8 @@ public class MergeService {
             com.archery.range.repository.LaneRepository laneRepository,
             MergeRelationMigrator migrator,
             ObjectMapper objectMapper,
+            com.archery.range.repository.DamageSettlementRepository damageSettlementRepository,
+            com.archery.range.repository.MemberDebtRepository memberDebtRepository,
             com.archery.range.repository.CourseEnrollRepository enrollRepository,
             com.archery.range.repository.CourseRepository courseRepository,
             com.archery.range.repository.MatchArrowRepository matchArrowRepository,
@@ -85,6 +89,8 @@ public class MergeService {
         this.laneRepository = laneRepository;
         this.migrator = migrator;
         this.objectMapper = objectMapper;
+        this.damageSettlementRepository = damageSettlementRepository;
+        this.memberDebtRepository = memberDebtRepository;
         this.analysis = new MergeAnalysis(roundRepository, enrollRepository, courseRepository,
                 equipmentRepository, equipmentShadowRepository, laneRepository, certApplicationRepository,
                 teamMemberRepository, teamRepository, tournamentRepository,
@@ -175,6 +181,18 @@ public class MergeService {
         equipmentRepository.findRentedByRenterForUpdate(sourceId);
         laneRepository.findOccupiedByMemberForUpdate(keepId);
         laneRepository.findOccupiedByMemberForUpdate(sourceId);
+
+        // 任一会员存在未结束的器材损伤清算时不能合并：清算单绑定了检查开始时的租借人与余额基线，
+        // 封存档案 / 余额合并会让基线失效，必须先在清算台结清或重新核对
+        if (damageSettlementRepository.existsOpenByMember(keepId)
+                || damageSettlementRepository.existsOpenByMember(sourceId)) {
+            throw new BizException("会员存在未结清的器材损伤清算单（归还处理中 / 待结清 / 待核对），"
+                    + "请先完成清算结清后再合并档案");
+        }
+        if (memberDebtRepository.existsUnpaidByMember(keepId)
+                || memberDebtRepository.existsUnpaidByMember(sourceId)) {
+            throw new BizException("会员存在未缴清的器材损伤待缴费用，租借资格暂停中，请先补足欠款解限后再合并档案");
+        }
 
         MergeAnalysis.Report current = analysis.analyze(keep, source);
         if (!current.keep().fingerprint().equals(preview.getKeepFingerprint())

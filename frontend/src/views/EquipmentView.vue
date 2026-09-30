@@ -14,8 +14,10 @@
     </div>
 
     <div class="rule-tip">
-      只有「在库」器材可租借，租借按 1 小时租金从会员余额扣；「租出」可归还；「维修」中的器材不能租借，修好后回到在库。
-      「安全锁定」由停射事件触发，锁定期间禁止租借、归还与切换维修状态，放行后恢复锁定前状态。
+      只有「在库」器材可租借，租借按 1 小时租金从会员余额扣。租出器材点「损伤检查」进入清算台：
+      无损在清算台结清回库；有损伤按规则收费、送修或报废封存。「维修」中的器材不能租借，修好后回到在库。
+      「归还处理中」在清算结束前不能再次租借、报修或清除租借人；「安全锁定」必须先在联锁台放行。
+      存在未缴损伤费用的会员会被暂停租借，补足欠款解限后恢复。
       <b>租借反曲弓 / 复合弓 / 传统弓器材，会员必须持有该弓种的当前有效认证；护具与箭支不受限制。</b>
     </div>
 
@@ -42,11 +44,16 @@
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :disabled="row.status !== 'INSTOCK'" @click="openRent(row)">租借</el-button>
-            <el-button link type="success" :disabled="row.status !== 'RENTED'" @click="giveBack(row)">归还</el-button>
-            <el-button link type="warning" :disabled="row.status === 'RENTED' || row.status === 'LOCKED'" @click="repair(row)">
+            <el-button
+              link
+              type="success"
+              :disabled="row.status !== 'RENTED' && row.status !== 'SETTLING'"
+              @click="goDamage(row)"
+            >{{ row.status === 'SETTLING' ? '清算中' : '损伤检查' }}</el-button>
+            <el-button link type="warning" :disabled="!canRepair(row)" @click="repair(row)">
               {{ row.status === 'REPAIR' ? '修好' : '报修' }}
             </el-button>
           </template>
@@ -106,8 +113,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { certApi, equipApi, memberApi, money, shortTime } from '../api'
+
+const router = useRouter()
 
 const BOW_TYPES = ['RECURVE', 'COMPOUND', 'TRADITIONAL']
 
@@ -145,7 +155,17 @@ function statusType(status) {
   if (status === 'INSTOCK') return 'success'
   if (status === 'RENTED') return 'primary'
   if (status === 'LOCKED') return 'danger'
-  return 'info'
+  if (status === 'SCRAPPED') return 'info'
+  return 'warning'
+}
+
+function canRepair(row) {
+  return row.status !== 'RENTED' && row.status !== 'LOCKED' &&
+    row.status !== 'SETTLING' && row.status !== 'SCRAPPED'
+}
+
+function goDamage(row) {
+  router.push({ path: '/damage', query: row.status === 'SETTLING' ? { settlement: 'open' } : { equip: row.id } })
 }
 
 async function loadList() {
@@ -185,12 +205,6 @@ async function submitRent() {
   rentVisible.value = false
   await loadList()
   await loadMembers()
-}
-
-async function giveBack(row) {
-  await equipApi.giveBack(row.id)
-  ElMessage.success('已归还')
-  await loadList()
 }
 
 async function repair(row) {

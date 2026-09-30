@@ -21,12 +21,14 @@ public class EquipmentService {
     private final EquipmentRepository equipmentRepository;
     private final MemberService memberService;
     private final CertService certService;
+    private final DamageSettlementService damageSettlementService;
 
     public EquipmentService(EquipmentRepository equipmentRepository, MemberService memberService,
-            CertService certService) {
+            CertService certService, DamageSettlementService damageSettlementService) {
         this.equipmentRepository = equipmentRepository;
         this.memberService = memberService;
         this.certService = certService;
+        this.damageSettlementService = damageSettlementService;
     }
 
     @Transactional(readOnly = true)
@@ -73,6 +75,11 @@ public class EquipmentService {
         Member member = memberService.require(req.memberId());
         // 已合并封存的来源档案不能再租借器材
         memberService.rejectIfMerged(member, "租借器材");
+        // 有待缴损伤费用的会员已被暂停租借资格，补足欠款解限前不能再租借
+        if (damageSettlementService.isRentalBlocked(member.getId())) {
+            throw new BizException("会员 [" + member.getName() + "] 存在未结清的器材损伤待缴费用，"
+                    + "租借资格已暂停，请先补足欠款并完成解限");
+        }
         // 租借弓类器材必须持有该弓种的当前有效认证（护具 / 箭支不限制）
         certService.requireBowCert(member, equipment.getType());
         memberService.charge(member, equipment.getRentPrice(), "租借 " + equipment.getEquipCode());
@@ -84,11 +91,18 @@ public class EquipmentService {
         return toView(equipmentRepository.save(equipment));
     }
 
-    /** 归还：只有租出的器材能还。安全锁定中禁止归还。 */
+    /** 归还：只有租出的器材能还。安全锁定中禁止归还；归还处理中必须走损伤清算流程。 */
     @Transactional
     public EquipmentDtos.EquipmentView giveBack(Long id) {
         Equipment equipment = requireForUpdate(id);
         rejectIfLocked(equipment, "归还");
+        if ("SETTLING".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode() + "] 已发起损伤检查，处于归还处理中，"
+                    + "请在损伤清算台完成检查与结清");
+        }
+        if ("SCRAPPED".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode() + "] 已报废封存，不能归还");
+        }
         if (!"RENTED".equals(equipment.getStatus())) {
             throw new BizException("器材 [" + equipment.getEquipCode() + "] 未处于租出状态，无需归还");
         }
@@ -99,11 +113,18 @@ public class EquipmentService {
         return toView(equipmentRepository.save(equipment));
     }
 
-    /** 报修 / 修好：在库 → 维修，维修 → 在库。安全锁定中禁止切换维修状态。 */
+    /** 报修 / 修好：在库 → 维修，维修 → 在库。安全锁定 / 归还处理中 / 报废封存均禁止切换。 */
     @Transactional
     public EquipmentDtos.EquipmentView toggleRepair(Long id) {
         Equipment equipment = requireForUpdate(id);
         rejectIfLocked(equipment, "切换维修状态");
+        if ("SETTLING".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode() + "] 处于归还处理中，"
+                    + "清算结束前不能切换维修状态");
+        }
+        if ("SCRAPPED".equals(equipment.getStatus())) {
+            throw new BizException("器材 [" + equipment.getEquipCode() + "] 已报废永久封存，不能切换维修状态");
+        }
         if ("RENTED".equals(equipment.getStatus())) {
             throw new BizException("器材 [" + equipment.getEquipCode() + "] 租出中，请先归还再报修");
         }

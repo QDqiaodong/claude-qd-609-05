@@ -88,6 +88,30 @@ export const equipApi = {
   options: () => http.get('/equipment/options')
 }
 
+/** 模块十：器材损伤清算（发起检查 → 损伤登记 → 减免 / 异议 → 结清 → 补缴解限） */
+export const damageApi = {
+  options: () => http.get('/damage/options'),
+  rules: () => http.get('/damage/rules'),
+  createRule: (data) => http.post('/damage/rules', data),
+  rented: () => http.get('/damage/rented'),
+  start: (equipmentId, inspector) => http.post(`/damage/equipment/${equipmentId}/inspection`, { inspector }),
+  list: (params) => http.get('/damage/settlements', { params }),
+  detail: (id) => http.get(`/damage/settlements/${id}`),
+  addDamage: (id, data) => http.post(`/damage/settlements/${id}/items`, data),
+  removeDamage: (id, itemId, data) => http.post(`/damage/settlements/${id}/items/${itemId}/remove`, data),
+  finishInspection: (id, operator) => http.post(`/damage/settlements/${id}/finish-inspection`, { operator }),
+  abandon: (id, operator) => http.post(`/damage/settlements/${id}/abandon`, { operator }),
+  preview: (id) => http.get(`/damage/settlements/${id}/preview`),
+  rebind: (id, operator) => http.post(`/damage/settlements/${id}/rebind`, { operator }),
+  settle: (id, data) => http.post(`/damage/settlements/${id}/settle`, data),
+  waive: (id, itemId, data) => http.post(`/damage/settlements/${id}/items/${itemId}/waive`, data),
+  dispute: (id, itemId, data) => http.post(`/damage/settlements/${id}/items/${itemId}/dispute`, data),
+  handleDispute: (id, itemId, data) => http.post(`/damage/settlements/${id}/items/${itemId}/dispute-handle`, data),
+  debts: (params) => http.get('/damage/debts', { params }),
+  debtDetail: (id) => http.get(`/damage/debts/${id}`),
+  repay: (id, data) => http.post(`/damage/debts/${id}/repay`, data)
+}
+
 /** 模块六：安全停射联锁台（建立事件 → 双人分项复核 → 复射放行） */
 export const safetyApi = {
   options: () => http.get('/safety/options'),

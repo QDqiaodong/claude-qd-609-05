@@ -92,6 +92,63 @@ public final class RangeDict {
             "GEAR", "护具",
             "ARROW", "箭支");
 
+    // ---------------- 器材损伤清算 ----------------
+    /** 损伤严重程度：轻微 / 中等 / 严重（对应计价规则的三个档） */
+    private static final Map<String, String> DAMAGE_SEVERITY = Map.of(
+            "LIGHT", "轻微",
+            "MEDIUM", "中等",
+            "SEVERE", "严重");
+
+    /** 清算单状态：检查中 → 待结清 → 已结清；基线漂移转待重新核对（核对后回到待结清） */
+    private static final Map<String, String> SETTLE_STATUS = Map.of(
+            "INSPECTING", "检查中",
+            "PENDING_SETTLE", "待结清",
+            "RECHECK", "待重新核对",
+            "SETTLED", "已结清");
+
+    /** 单个损伤项的异议处理结论 */
+    private static final Map<String, String> DISPUTE_STATUS = Map.of(
+            "DISPUTING", "异议处理中",
+            "MAINTAIN", "维持原费用",
+            "REDUCE", "经理减免",
+            "REVOKE", "撤销该项费用");
+
+    /** 待缴费用状态：待缴 → 已缴清 / 已撤销 */
+    private static final Map<String, String> DEBT_STATUS = Map.of(
+            "UNPAID", "待缴",
+            "PAID", "已缴清",
+            "REVOKED", "已撤销");
+
+    /** 清算单操作轨迹动作 */
+    private static final Map<String, String> SETTLE_ACTION = Map.ofEntries(
+            Map.entry("START", "发起损伤检查"),
+            Map.entry("ADD_DAMAGE", "登记损伤项"),
+            Map.entry("REMOVE_DAMAGE", "移除损伤项"),
+            Map.entry("FINISH_INSPECT", "结束检查（无损）"),
+            Map.entry("WAIVE", "经理减免损伤项"),
+            Map.entry("DISPUTE", "会员提出异议"),
+            Map.entry("DISPUTE_MAINTAIN", "异议处理：维持"),
+            Map.entry("DISPUTE_REDUCE", "异议处理：减免"),
+            Map.entry("DISPUTE_REVOKE", "异议处理：撤销"),
+            Map.entry("RECHECK", "基线变化，转待重新核对"),
+            Map.entry("REBIND", "重新核对完成"),
+            Map.entry("SETTLE", "结清清算单"),
+            Map.entry("REPAY", "补缴欠款解限"),
+            Map.entry("ABANDON", "放弃清算（回到租出）"));
+
+    /** 补缴 / 欠款轨迹的角色 */
+    private static final Map<String, String> SETTLE_ROLE = Map.of(
+            "KEEPER", "器材管理员",
+            "MANAGER", "值班经理",
+            "MEMBER", "会员",
+            "SYSTEM", "清算系统");
+
+    /** 结清后器材去向 */
+    private static final Map<String, String> DAMAGE_DISPOSAL = Map.of(
+            "NONE", "回到在库",
+            "REPAIR", "送修",
+            "SCRAP", "报废封存");
+
     // ---------------- 弓种能力认证 ----------------
     /** 可认证的弓种（器材类型的弓类子集） */
     private static final Map<String, String> BOW_TYPE = Map.of(
@@ -143,7 +200,9 @@ public final class RangeDict {
             "INSTOCK", "在库",
             "RENTED", "租出",
             "REPAIR", "维修",
-            "LOCKED", "安全锁定");
+            "LOCKED", "安全锁定",
+            "SETTLING", "归还处理中",
+            "SCRAPPED", "报废封存");
 
     // ---------------- 回合状态 ----------------
     private static final Map<String, String> ROUND_STATUS = Map.of(
@@ -334,6 +393,40 @@ public final class RangeDict {
 
     public static String equipTypeName(String type) {
         return type == null ? "" : EQUIP_TYPE.getOrDefault(type, type);
+    }
+
+    // ---------------- 器材损伤清算取值 ----------------
+
+    public static boolean isValidDamageSeverity(String severity) {
+        return severity != null && DAMAGE_SEVERITY.containsKey(severity);
+    }
+
+    public static String damageSeverityName(String severity) {
+        return severity == null ? "" : DAMAGE_SEVERITY.getOrDefault(severity, severity);
+    }
+
+    public static String settleStatusName(String status) {
+        return status == null ? "" : SETTLE_STATUS.getOrDefault(status, status);
+    }
+
+    public static String disputeStatusName(String status) {
+        return status == null ? "" : DISPUTE_STATUS.getOrDefault(status, status);
+    }
+
+    public static String debtStatusName(String status) {
+        return status == null ? "" : DEBT_STATUS.getOrDefault(status, status);
+    }
+
+    public static String settleActionName(String action) {
+        return action == null ? "" : SETTLE_ACTION.getOrDefault(action, action);
+    }
+
+    public static String settleRoleName(String role) {
+        return role == null ? "" : SETTLE_ROLE.getOrDefault(role, role);
+    }
+
+    public static String damageDisposalName(String disposal) {
+        return disposal == null ? "" : DAMAGE_DISPOSAL.getOrDefault(disposal, disposal);
     }
 
     // ---------------- 弓种能力认证取值 ----------------
